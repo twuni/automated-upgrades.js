@@ -22,8 +22,9 @@ package_upgrade() {
   (
     cd "${PROJECT_DIR}"
     echo "[upgrade] $(basename "${PROJECT_DIR}") (in ${PROJECT_DIR})"
-    asdf local nodejs 12.9.1
+    asdf local nodejs 12.10.0
     asdf local yarn 1.17.3
+    ([ -f .circleci/config.yml ] && sed -i'' -E 's_/nodejs(:|@).+$_/nodejs\112.10.0_g' .circleci/config.yml)
     rm -f yarn.lock package-lock.json
     yarn install
     yarn outdated --json | node ../yarn-upgrade.js
@@ -32,10 +33,11 @@ package_upgrade() {
     (grep --quiet '"build":' package.json && yarn build)
     (grep --quiet '"documentation":' package.json && yarn documentation)
     (grep --quiet '"test":' package.json && yarn test)
+    git add .
+    git diff --cached -w
     printf '💡 Should I commit these changes? (y/N) '
     read OK_TO_COMMIT
     if [ "${OK_TO_COMMIT}" = 'y' ]; then
-      git add .
       git commit -m "📦 Upgrade dependencies to their latest versions"
 
       grep -E '^  "version": ".+",' package.json | head -1
