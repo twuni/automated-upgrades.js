@@ -1,5 +1,38 @@
 #!/usr/bin/env bash
 
+NODEJS_VERSION=12.10.0
+YARN_VERSION=1.17.3
+
+asdf_tools_upgrade() {
+  asdf local nodejs "${NODEJS_VERSION}"
+  asdf local yarn "${YARN_VERSION}"
+}
+
+circleci_upgrade() {
+  sed -i'' -E "s_/nodejs(:|@).+\$_/nodejs\\1${NODEJS_VERSION}_g" ".circleci/config.yml"
+}
+
+yarn_reset() {
+  rm -f yarn.lock
+  yarn install
+}
+
+yarn_upgrade() {
+  yarn outdated --json | node ../yarn-upgrade.js
+}
+
+npm_reset() {
+  rm -f package-lock.json
+  npm install
+}
+
+package_checks() {
+  (grep --quiet '"lint":' package.json && yarn lint)
+  (grep --quiet '"build":' package.json && yarn build)
+  (grep --quiet '"documentation":' package.json && yarn documentation)
+  (grep --quiet '"test":' package.json && yarn test)
+}
+
 package_upgrade() {
   local REPO_NAME="$1"
   shift
@@ -21,30 +54,38 @@ package_upgrade() {
 
   (
     cd "${PROJECT_DIR}"
+
     echo "[upgrade] $(basename "${PROJECT_DIR}") (in ${PROJECT_DIR})"
-    asdf local nodejs 12.10.0
-    asdf local yarn 1.17.3
-    ([ -f .circleci/config.yml ] && sed -i'' -E 's_/nodejs(:|@).+$_/nodejs\112.10.0_g' .circleci/config.yml)
-    rm -f yarn.lock package-lock.json
-    yarn install
-    yarn outdated --json | node ../yarn-upgrade.js
-    npm install
-    (grep --quiet '"lint":' package.json && yarn lint)
-    (grep --quiet '"build":' package.json && yarn build)
-    (grep --quiet '"documentation":' package.json && yarn documentation)
-    (grep --quiet '"test":' package.json && yarn test)
+
+    if [ -f ".tool-versions" ]; then
+      asdf_tools_upgrade
+    fi
+
+    if [ -f ".circleci/config.yml" ]; then
+      circleci_upgrade
+    fi
+
+    yarn_reset
+    yarn_upgrade
+    npm_reset
+    package_checks
+
     git add .
-    git diff --cached -w
+    git diff --cached -w package.json .circleci/config.yml
+
     printf '💡 Should I commit these changes? (y/N) '
     read OK_TO_COMMIT
+
     if [ "${OK_TO_COMMIT}" = 'y' ]; then
       git commit -m "📦 Upgrade dependencies to their latest versions"
 
       grep -E '^  "version": ".+",' package.json | head -1
       printf '🏁 Next version: '
       read NEXT_VERSION
+
       if [ -n "${NEXT_VERSION}" ]; then
         sed -i'' -E "s|^  \"version\": \"(.+)\",|  \"version\": \"${NEXT_VERSION}\",|g" package.json
+
         npm install
         git diff package.json
         git status
@@ -59,6 +100,7 @@ package_upgrade() {
       git push
     fi
   )
+
   rm -fR "${PROJECT_DIR}"
 }
 
